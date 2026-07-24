@@ -22,8 +22,8 @@ def build_index(file_path: str, collection_name: str) -> Chroma:
     # Split to chunks
 
     splitter = RecursiveCharacterTextSplitter(
-        chunk_size=500,
-        chunk_overlap=50,
+        chunk_size=900,
+        chunk_overlap=150,
         add_start_index=True,
     )
     chunks = splitter.split_documents(documents)
