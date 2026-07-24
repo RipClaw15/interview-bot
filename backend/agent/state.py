@@ -1,9 +1,9 @@
 from langchain_core.messages import BaseMessage
 
-from typing import Annotated, List, TypedDict
+from typing import Annotated, Any, List, Literal, NotRequired, TypedDict
 
 from langgraph.graph.message import add_messages
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 HINT_STRATEGIES = {
@@ -20,15 +20,25 @@ class TutorState(TypedDict):
     hint_level: int
     misconception: str
     resolved: bool
+    llm: Any
+    topic_changed: NotRequired[bool]
 
 
-# This is the request body schema for the /chat endpoint. It includes the user's new message, as well as optional fields for the current topic, hint level, misconception, resolved status, and conversation history. The history is a list of message objects that represent the conversation so far, which allows the backend to reconstruct the full context when processing the new message.
+class HistoryMessage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    role: Literal["user", "assistant"]
+    content: str = Field(default="", max_length=4000)
+
+
 class ChatRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     message: str = Field(..., min_length=1, max_length=1000)
     topic: str = Field(default="", max_length=100)
-    hint_level: int = Field(default=0, ge=0, le=3) 
-    misconception: str  = Field(default="", max_length=500)
+    hint_level: int = Field(default=0, ge=0, le=3)
+    misconception: str = Field(default="", max_length=500)
     resolved: bool = False
-    history: List[dict] = Field(default=[],max_length=50)
-    session_id: str = Field(default="")
-    provider: str = Field(default="groq")
+    history: List[HistoryMessage] = Field(default_factory=list, max_length=50)
+    session_id: str = Field(default="", max_length=36)
+    provider: Literal["ollama", "groq", "gemini"] = "groq"

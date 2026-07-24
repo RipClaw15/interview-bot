@@ -1,28 +1,19 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { setTutorConsent, useTutorConsent } from "@/lib/consent";
 
 export default function WelcomeModal() {
-  const [isOpen, setIsOpen] = useState(false);
-
-  useEffect(() => {
-    //const consented = localStorage.getItem("tutorConsent");
-    //if (consented === null) {
-      setIsOpen(true);
-    //}
-  }, []);
+  const consent = useTutorConsent();
 
   const handleAgree = () => {
-    localStorage.setItem("tutorConsent", "true");
-    setIsOpen(false);
+    setTutorConsent(true);
   };
 
   const handleDecline = () => {
-    localStorage.setItem("tutorConsent", "false");
-    setIsOpen(false);
+    setTutorConsent(false);
   };
 
-  if (!isOpen) return null;
+  if (consent !== null) return null;
 
   return (
      <div className="fixed inset-0 bg-blue bg-opacity-5 backdrop-blur-sm flex items-center justify-center z-50">

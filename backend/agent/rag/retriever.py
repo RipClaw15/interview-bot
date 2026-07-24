@@ -1,26 +1,51 @@
-import os
-# from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_community.embeddings import FastEmbedEmbeddings
+import re
+
 from langchain_chroma import Chroma
 
-os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "false"
 
-# embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+METADATA_QUERY = re.compile(
+    r"\b(title|author|authors|wrote|paper called|abstract|affiliation)\b",
+    re.IGNORECASE,
+)
 
-embeddings = FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5")
 
-def get_relevant_context(vectorstore: Chroma, query: str, k: int = 3) -> str:
-    """Given a query, retrieve the k most relevant context from the vector store and return it as a string."""
+def get_relevant_context(
+    vectorstore: Chroma,
+    query: str,
+    k: int = 5,
+) -> str:
     if vectorstore is None:
         return ""
-    retriever = vectorstore.as_retriever(search_kwargs={"k": k})
-    docs = retriever.invoke(query)
 
+    docs = vectorstore.similarity_search(query, k=k)
 
-    if not docs:
-        return ""
-    # print(f"[RAG] Retrieved {len(docs)} chunks for query: {query[:50]}...")
-    # for doc in docs:
-    #    print(f"[RAG] Chunk: {doc.page_content[:100]}...")
-    context = "\n\n---\n\n".join(doc.page_content for doc in docs)
-    return context
+    if METADATA_QUERY.search(query):
+        front_matter = vectorstore.similarity_search(
+            query,
+            k=1,
+            filter={"section": "front_matter"},
+        )
+        docs = front_matter + docs
+
+    unique_docs = []
+    seen = set()
+
+    for doc in docs:
+        key = (
+            doc.metadata.get("page_number"),
+            doc.metadata.get("line_start"),
+            doc.page_content,
+        )
+        if key not in seen:
+            seen.add(key)
+            unique_docs.append(doc)
+
+    return "\n\n---\n\n".join(
+        (
+            f"[PDF page {doc.metadata.get('page_number', '?')}, "
+            f"lines {doc.metadata.get('line_start', '?')}-"
+            f"{doc.metadata.get('line_end', '?')}]\n"
+            f"{doc.page_content}"
+        )
+        for doc in unique_docs
+    )

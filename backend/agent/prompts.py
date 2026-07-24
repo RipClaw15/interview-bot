@@ -1,6 +1,8 @@
 EXTRACT_TOPIC_PROMPT = """   The user wants to learn about a CS or programming concept.
                     Extract the topic from their message.
 
+                    Current topic: {current_topic}
+
                     Examples:
                         - "explaint recursion" -> "recursion"
                         - "what is a binary search tree?" -> "binary search tree"
@@ -11,9 +13,10 @@ EXTRACT_TOPIC_PROMPT = """   The user wants to learn about a CS or programming c
                         - "what is the output of this code: ```python\nprint(2+2)```?" -> "python code execution"
                     If the message contains ANY reference to a CS or programming concept, return that concept.
                     If the student wants to know the output of code, return "code execution" with the relevant language if possible and execute the code with the output.
+                    If the message is a follow-up, answer, clarification, or confirmation about the current topic, return "same".
                     Only return "unknown" if the message is purely social with zero technical content.
 
-                    Return ONLY the topic name or "unknown". Nothing else.
+                    Return ONLY the topic name, "same", or "unknown". Nothing else.
 
                  User message: {latest_message}"""
 
@@ -38,8 +41,8 @@ ASSESS_UNDERSTANDING_PROMPT = """You are evaluating a student learning about: {t
         - Increase hint_level if the user is still clearly confused after the previous hint.
         - If the student wants to execute code, execute the code and tell the student the output, assess whether their code is correct and whether executing it resolved their confusion.
         - If the user says 'I don't know' or 'I have no idea' two or more times in a row, increase hint_level immediately.
-        - Never decrease hint_level.
-        - misconception should be "" if resolved=true.
+        - Never decrease hint_level while the current problem remains unresolved.
+        - If resolved=true, set hint_level=0 and misconception="" so the next problem starts a fresh hint cycle.
         - Return ONLY the JSON object, no other text."""
 
 RESPOND_PROMPT = """You are a Socratic CS tutor teaching: {topic}

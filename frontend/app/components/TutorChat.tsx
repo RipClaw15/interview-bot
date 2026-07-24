@@ -1,12 +1,15 @@
 "use client";
 
-
-import {useState, useRef, useEffect} from "react";  
+import {useState, useRef, useEffect} from "react";
 import emailjs from "@emailjs/browser";
+import Link from "next/link";
+import { useTutorConsent } from "@/lib/consent";
 
 interface Message {
+  id: string;
   role: "user" | "assistant";
   content: string;
+  includeInHistory?: boolean;
 }
 
 interface TutorState {
@@ -21,10 +24,29 @@ interface TutorChatProps {
   provider?: "groq" | "gemini";
 }
 
+type Provider = NonNullable<TutorChatProps["provider"]>;
+
+const BACKEND_URL =
+  process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+
+function newMessage(
+  role: Message["role"],
+  content: string,
+  includeInHistory = true,
+): Message {
+  return {
+    id: crypto.randomUUID(),
+    role,
+    content,
+    includeInHistory,
+  };
+}
+
 export default function TutorChat({ initialMessage = "", provider = "groq" }: TutorChatProps) {
   const [messages, setMessages]   = useState<Message[]>([]);
   const [input, setInput]         = useState(initialMessage);
   const [streaming, setStreaming] = useState(false);
+  const [activeProvider, setActiveProvider] = useState<Provider>(provider);
   const [state, setState]         = useState<TutorState>({
       topic: "",
       hint_level: 0,
@@ -34,12 +56,13 @@ export default function TutorChat({ initialMessage = "", provider = "groq" }: Tu
   const [sessionId, setSessionId]     = useState("");
   const [uploading, setUploading]     = useState(false);
   const [docUploaded, setDocUploaded] = useState(false);
-  const [consent, setConsent] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const consent = useTutorConsent() === true;
 
   const bottomRef   = useRef<HTMLDivElement>(null);
   const inputRef    = useRef<HTMLTextAreaElement>(null);
   const abortRef    = useRef<AbortController | null>(null);
+  const uploadAbortRef = useRef<AbortController | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
 
@@ -48,47 +71,53 @@ export default function TutorChat({ initialMessage = "", provider = "groq" }: Tu
     bottomRef.current?.scrollIntoView({behavior: "smooth"});
   }, [messages]);
 
-  useEffect(() => {
-  const val = localStorage.getItem("tutorConsent");
-  setConsent(val === "true");
-}, []);
-
-
 async function send() {
     const text = input.trim();
-    if (!text || streaming) return;
+    if (!text || streaming || uploading) return;
 
-    const userMessage: Message = { role: "user", content: text };
-    const updatedMessages = [...messages, userMessage];
+    const userMessage = newMessage("user", text);
+    const assistantMessage = newMessage("assistant", "");
+    const assistantMessageId = assistantMessage.id;
+    const history = messages
+      .filter((message) => message.includeInHistory !== false)
+      .map(({role, content}) => ({role, content}));
 
-    setMessages(updatedMessages);
+    setMessages((prev) => [...prev, userMessage, assistantMessage]);
     setInput("");
     setStreaming(true);
-
-    setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
 
     abortRef.current = new AbortController();
 
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/chat`, {
+      const res = await fetch(`${BACKEND_URL}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         signal: abortRef.current.signal,
         body: JSON.stringify({
           message: text,
-          history: messages,
+          history,
           topic: state.topic,
           hint_level: state.hint_level,
           misconception: state.misconceptions,
           resolved: state.resolved,
           session_id: sessionId,
-          provider: provider,
+          provider: activeProvider,
         }),
       });
 
-      if (!res.ok) throw new Error(`Server error: ${res.status}`);
+      if (!res.ok) {
+        let detail = `Server error: ${res.status}`;
+        try {
+          const errorBody = await res.json();
+          if (typeof errorBody.detail === "string") detail = errorBody.detail;
+        } catch {
+          // Keep the status-based fallback when the body is not JSON.
+        }
+        throw new Error(detail);
+      }
+      if (!res.body) throw new Error("Server returned an empty response");
 
-      const reader  = res.body!.getReader();
+      const reader  = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer    = "";
 
@@ -97,7 +126,6 @@ async function send() {
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
-        console.log("buffer:", buffer);
         const lines = buffer.split("\n");
         buffer = lines.pop() ?? "";
 
@@ -110,14 +138,13 @@ async function send() {
             const event = JSON.parse(raw);
 
             if (event.type === "token") {
-              setMessages((prev) => {
-                const next = [...prev];
-                next[next.length - 1] = {
-                  role: "assistant",
-                  content: next[next.length - 1].content + event.content,
-                };
-                return next;
-              });
+              setMessages((prev) =>
+                prev.map((message) =>
+                  message.id === assistantMessageId
+                    ? {...message, content: message.content + event.content}
+                    : message
+                )
+              );
             }
 
             if (event.type === "state") {
@@ -130,14 +157,13 @@ async function send() {
             }
 
             if (event.type === "error") {
-              setMessages((prev) => {
-                const next = [...prev];
-                next[next.length - 1] = {
-                  role: "assistant",
-                  content: `Error: ${event.content}`,
-                };
-                return next;
-              });
+              setMessages((prev) =>
+                prev.map((message) =>
+                  message.id === assistantMessageId
+                    ? {...message, content: `Error: ${event.content}`}
+                    : message
+                )
+              );
             }
           } catch {
             // malformed SSE line, skip
@@ -146,14 +172,16 @@ async function send() {
       }
     } catch (err: unknown) {
       if (err instanceof Error && err.name !== "AbortError") {
-        setMessages((prev) => {
-          const next = [...prev];
-          next[next.length - 1] = {
-            role: "assistant",
-            content: "Connection error. Is the backend running?",
-          };
-          return next;
-        });
+        setMessages((prev) =>
+          prev.map((message) =>
+            message.id === assistantMessageId
+              ? {
+                  ...message,
+                  content: err.message || "Connection error. Is the backend running?",
+                }
+              : message
+          )
+        );
       }
     } finally {
       setStreaming(false);
@@ -168,12 +196,30 @@ async function send() {
     }
   }
 
+  async function releaseDocumentSession(id: string) {
+    if (!id) return;
+    try {
+      await fetch(`${BACKEND_URL}/sessions/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      });
+    } catch {
+      // Backend TTL cleanup remains the fallback if the client disconnects.
+    }
+  }
+
   function reset() {
     abortRef.current?.abort();
+    uploadAbortRef.current?.abort();
+    const previousSessionId = sessionId;
     setMessages([]);
     setState({ topic: "", hint_level: 0, misconceptions: "", resolved: false });
     setInput("");
     setStreaming(false);
+    setUploading(false);
+    setSessionId("");
+    setDocUploaded(false);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+    void releaseDocumentSession(previousSessionId);
   }
 
   const sendReport = async () => {
@@ -215,55 +261,70 @@ async function send() {
   // Upload file handler
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (!file || uploading || streaming) return;
 
     setUploading(true);
+    uploadAbortRef.current = new AbortController();
+    const uploadMessage = newMessage(
+      "assistant",
+      `Uploading "${file.name}"...`,
+      false,
+    );
+    const uploadMessageId = uploadMessage.id;
 
     // Immediately show uploading message in chat
-    setMessages((prev) => [
-      ...prev,
-      {
-        role: "assistant",
-        content: `Uploading "${file.name}"...`,
-      },
-    ]);
+    setMessages((prev) => [...prev, uploadMessage]);
 
     const formData = new FormData();
     formData.append("file", file);
 
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/upload`, {
+      const res = await fetch(`${BACKEND_URL}/upload`, {
         method: "POST",
         body: formData,
+        signal: uploadAbortRef.current.signal,
       });
 
       if (!res.ok) throw new Error("Upload failed");
 
       const data = await res.json();
+      const previousSessionId = sessionId;
       setSessionId(data.session_id);
       setDocUploaded(true);
+      if (previousSessionId && previousSessionId !== data.session_id) {
+        void releaseDocumentSession(previousSessionId);
+      }
 
       // Replace the uploading message with success
-      setMessages((prev) => {
-        const next = [...prev];
-        next[next.length - 1] = {
-          role: "assistant",
-          content: `✓ "${file.name}" uploaded and indexed. I will now use it to help answer your questions.`,
-        };
-        return next;
-      });
-    } catch {
+      setMessages((prev) =>
+        prev.map((message) =>
+          message.id === uploadMessageId
+            ? {
+                ...message,
+                content: `✓ "${file.name}" uploaded and indexed. I will now use it to help answer your questions.`,
+              }
+            : message
+        )
+      );
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") return;
+
       // Replace the uploading message with error
-      setMessages((prev) => {
-        const next = [...prev];
-        next[next.length - 1] = {
-          role: "assistant",
-          content: "Failed to upload document. Please try again.",
-        };
-        return next;
-      });
+      setMessages((prev) =>
+        prev.map((message) =>
+          message.id === uploadMessageId
+            ? {
+                ...message,
+                content: sessionId
+                  ? "Failed to upload document. The previous document is still active."
+                  : "Failed to upload document. Please try again.",
+              }
+            : message
+        )
+      );
     } finally {
       setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   }
 
@@ -285,7 +346,13 @@ async function send() {
         {/* Header */}
         <header className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
           <div className="flex items-center gap-3">
-            <span className="text-lg font-semibold text-white">CS Tutor</span>
+            <Link
+              href="/"
+              aria-label="Back to home"
+              className="rounded-md text-lg font-semibold text-white transition-colors hover:text-zinc-300 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
+            >
+              CS Tutor
+            </Link>
             {state.topic && (
               <span className="text-xs px-2 py-0.5 rounded bg-zinc-800 text-zinc-400">
                 {state.topic}
@@ -293,6 +360,21 @@ async function send() {
             )}
           </div>
           <div className="flex items-center gap-4">
+            <label className="flex items-center gap-2 text-xs text-zinc-400">
+              <span className="sr-only">AI model</span>
+              <select
+                aria-label="AI model"
+                value={activeProvider}
+                onChange={(event) =>
+                  setActiveProvider(event.target.value as Provider)
+                }
+                disabled={streaming}
+                className="rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-200 outline-none transition-colors hover:border-zinc-500 focus:border-zinc-500 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <option value="groq">Groq · Llama 3.3 70B</option>
+                <option value="gemini">Gemini · 2.5 Flash Lite</option>
+              </select>
+            </label>
             {state.topic && (
               <div className="flex items-center gap-2 text-xs">
                 <span
@@ -335,7 +417,7 @@ async function send() {
 
           {messages.map((msg, i) => (
             <div
-              key={i}
+              key={msg.id}
               className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
             >
               <div
@@ -380,7 +462,7 @@ async function send() {
             />
             <button
               onClick={() => fileInputRef.current?.click()}
-              disabled={uploading}
+              disabled={uploading || streaming}
               className={`px-4 py-3 rounded-xl text-sm font-medium transition-colors border ${
                 docUploaded
                   ? "border-green-500 text-green-500"
@@ -392,7 +474,7 @@ async function send() {
 
             <button
               onClick={send}
-              disabled={streaming || !input.trim()}
+              disabled={streaming || uploading || !input.trim()}
               className="px-4 py-3 rounded-xl bg-white text-zinc-950 text-sm font-medium hover:bg-zinc-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
             >
               {streaming ? "..." : "Send"}

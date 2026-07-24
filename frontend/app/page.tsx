@@ -20,7 +20,7 @@ export default function LandingPage() {
   function startChat(prefill?: string) {
     const params = new URLSearchParams();
     params.set("provider", provider);
-    if (prefill) params.set("q", encodeURIComponent(prefill));
+    if (prefill) params.set("q", prefill);
     router.push(`/chat?${params.toString()}`);
   }
 

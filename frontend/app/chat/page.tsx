@@ -6,8 +6,8 @@ import TutorChat from "../components/TutorChat";
 
 function ChatWithParams() {
   const searchParams = useSearchParams();
-  const prefill = searchParams.get("q") ? decodeURIComponent(searchParams.get("q")!) : "";
-  const provider = (searchParams.get("provider") || "groq") as "groq" | "gemini";
+  const prefill = searchParams.get("q") || "";
+  const provider = searchParams.get("provider") === "gemini" ? "gemini" : "groq";
 
   return <TutorChat initialMessage={prefill} provider={provider} />;
 }

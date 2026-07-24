@@ -1,114 +1,160 @@
 import json
 import os
 
-from typing import Dict
 from dotenv import load_dotenv
-from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+from langchain_core.messages import HumanMessage
 from langgraph.graph import StateGraph, END
 from langchain_ollama import ChatOllama
-from langchain_groq import ChatGroq
-from slowapi import Limiter
-from .state import TutorState, HINT_STRATEGIES
+from pydantic import BaseModel, Field, StrictBool, ValidationError
 
-from .prompts import EXTRACT_TOPIC_PROMPT, ASSESS_UNDERSTANDING_PROMPT, CONGRATS_PROMPT
+from .state import TutorState
+
+from .prompts import EXTRACT_TOPIC_PROMPT, ASSESS_UNDERSTANDING_PROMPT
 
 load_dotenv()
 
 
-
-# This function initializes the language model based on environment variables. It supports multiple providers (currently "ollama" and "groq") and allows you to specify the model name and temperature. By abstracting this logic into a function, we can easily switch between different LLM providers or models without changing the core logic of our application.
-def get_llm(provider: str = None):
+def get_llm(provider: str | None = None):
     if provider is None:
         provider = os.getenv("LLM_PROVIDER", "groq")
-    model = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile")
+
+    default_models = {
+        "ollama": "llama3.2",
+        "groq": "llama-3.3-70b-versatile",
+        "gemini": "gemini-2.5-flash-lite",
+    }
+    configured_provider = os.getenv("LLM_PROVIDER")
+    configured_model = os.getenv("LLM_MODEL")
+    model = (
+        os.getenv(f"{provider.upper()}_MODEL")
+        or (configured_model if configured_provider == provider else None)
+        or default_models.get(provider)
+    )
 
     if provider == "ollama":
         return ChatOllama(model=model, temperature=0.4)
-    elif provider == "groq":
+    if provider == "groq":
         from langchain_groq import ChatGroq
-        return ChatGroq(model=model, temperature=0.4)
-    elif provider == "gemini":
+
+        api_key = os.getenv("GROQ_API_KEY")
+        if not api_key:
+            raise ValueError(
+                "GROQ_API_KEY is not configured. Add it to backend/.env "
+                "and restart the backend."
+            )
+        return ChatGroq(model=model, temperature=0.4, groq_api_key=api_key)
+    if provider == "gemini":
         from langchain_google_genai import ChatGoogleGenerativeAI
-        return ChatGoogleGenerativeAI(model="gemini-2.5-flash-lite", temperature=0.4)
+
+        if not os.getenv("GOOGLE_API_KEY"):
+            raise ValueError(
+                "GOOGLE_API_KEY is not configured. Add it to backend/.env "
+                "and restart the backend."
+            )
+        return ChatGoogleGenerativeAI(model=model, temperature=0.4)
 
     raise ValueError(f"Unknown provider: {provider}")
 
-llm = get_llm()
 
-def extract_topic_node(state: TutorState) -> dict:
-    
+class AssessmentResult(BaseModel):
+    resolved: StrictBool
+    hint_level: int = Field(ge=0, le=3)
+    misconception: str = Field(default="", max_length=500)
+
+
+def parse_assessment_result(raw: str) -> AssessmentResult:
+    cleaned = raw.strip()
+    if cleaned.startswith("```"):
+        lines = cleaned.splitlines()
+        if lines and lines[0].strip().lower() in {"```", "```json"}:
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        cleaned = "\n".join(lines).strip()
+    return AssessmentResult.model_validate(json.loads(cleaned))
+
+
+async def extract_topic_node(state: TutorState) -> dict:
     user_messages = [m for m in state["messages"] if isinstance(m, HumanMessage)]
     latest_message = user_messages[-1].content
 
-    prompt = EXTRACT_TOPIC_PROMPT.format(current_topic=state["topic"], latest_message=latest_message)
-    
-    response = llm.invoke([HumanMessage(content=prompt)])
+    current_topic = state["topic"] or "unknown"
+    prompt = EXTRACT_TOPIC_PROMPT.format(
+        current_topic=current_topic,
+        latest_message=latest_message,
+    )
+
+    response = await state["llm"].ainvoke([HumanMessage(content=prompt)])
     result = response.content.strip()
-    print("extracted topic:", result)
     if result.lower() == "same":
         return {}
 
-    print("extracted topic:", result)
-    # Post-process the response to handle common variations of "unknown" and ensure we have a clean topic string.
     topic = result.lower()
     if topic in ["unknown", "none", "no topic", "not mentioned"]:
-        topic = "unknown"
-    return {"topic": topic}
+        if current_topic != "unknown":
+            return {}
+        return {
+            "topic": "unknown",
+            "hint_level": 0,
+            "misconception": "",
+            "resolved": False,
+        }
 
-def assess_understanding_node(state: TutorState) -> dict:
+    if topic == current_topic.lower():
+        return {}
 
-    # If we don't know the topic yet, we can't really assess their understanding, so we'll just return the default state with no misconceptions and hint level 0. The tutor will then prompt them to clarify the topic in the next step.
+    return {
+        "topic": topic,
+        "hint_level": 0,
+        "misconception": "",
+        "resolved": False,
+        "topic_changed": True,
+    }
+
+
+async def assess_understanding_node(state: TutorState) -> dict:
+    if state.get("topic_changed", False):
+        return {"hint_level": 0, "misconception": "", "resolved": False}
+
     if state["topic"] == "unknown":
         return {"hint_level": 0, "misconception": "", "resolved": False}
-    
+
     if len(state["messages"]) < 2:
         return {"hint_level": 0, "misconception": "", "resolved": False}
-    
+
     history_text = "\n".join(
         f"{'User' if isinstance(m, HumanMessage) else 'Tutor'}: {m.content}"
         for m in state["messages"]
     )
-    # The prompt should instruct the LLM to analyze the conversation history and determine if the student's latest message indicates they have resolved their confusion, or if they still have misconceptions. It should also decide what the next hint level should be based on the student's current state of understanding.
     prompt = ASSESS_UNDERSTANDING_PROMPT.format(
         topic=state["topic"],
         history_text=history_text,
-        hint_level=state["hint_level"]
+        hint_level=state["hint_level"],
     )
 
-    response = llm.invoke([HumanMessage(content=prompt)])
+    response = await state["llm"].ainvoke([HumanMessage(content=prompt)])
 
     try:
-        raw = response.content.strip()
-        if raw.startswith("```json"):
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:].strip()
-        data = json.loads(raw.strip())
+        assessment = parse_assessment_result(response.content)
 
-        return {
-            "resolved": bool(data.get("resolved", False)),
-            "hint_level": max(state["hint_level"], int(data.get("hint_level", state["hint_level"]))),
-            "misconception": data.get("misconception", ""),
-        }
-    except (json.JSONDecodeError, KeyError):
+        if assessment.resolved:
+            return {
+                "resolved": True,
+                "hint_level": 0,
+                "misconception": "",
+            }
+
         return {
             "resolved": False,
-            "hint_level": min(state["hint_level"] + 1, 3),
+            "hint_level": max(state["hint_level"], assessment.hint_level),
+            "misconception": assessment.misconception,
+        }
+    except (json.JSONDecodeError, TypeError, ValidationError, ValueError):
+        return {
+            "resolved": False,
+            "hint_level": state["hint_level"],
             "misconception": state["misconception"],
         }
-
-
-def choose_strategy_node(state: TutorState)-> dict:
-    return {}
-
-
-
-def route_after_assessment(state: TutorState) -> str:
-    if state["resolved"]:
-        return "congratulate"
-    else:
-        return "choose_strategy"    
-    
 
 def build_assessment_graph() -> StateGraph:
     workflow = StateGraph(TutorState)

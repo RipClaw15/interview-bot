@@ -78,6 +78,9 @@ npm install
 npm run dev
 ```
 
+Copy `frontend/env.example` to `frontend/.env.local` and adjust the backend URL
+if it is not running on `http://localhost:8000`.
+
 Open `http://localhost:3000`.
 
 ## Project Structure
