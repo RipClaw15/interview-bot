@@ -125,7 +125,7 @@ TutorChatAgent/
 ## Features
 
 - Socratic tutoring with 4-level hint escalation
-- MCP Automatic code execution via Judge0 (Python, Java, C++, JavaScript and more)
+- Automatic code execution via Judge0 (Python, Java, C++, JavaScript and more)
 - PDF upload with RAG — tutor answers based on your actual study material
 - Choice of LLM provider (Groq or Gemini) from the landing page
 - Streaming responses
