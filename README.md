@@ -256,6 +256,31 @@ Do not add a trailing slash. Redeploy or restart the Railway backend after the
 change, then complete an interview from the Vercel site and send its report to
 an email address you control.
 
-## Next milestone
+## Run with Docker Compose
 
-Add Dockerfiles and a Docker Compose setup for reproducible local orchestration.
+Install and start Docker Desktop, then ensure `backend/.env` contains the required
+Groq configuration and optional Resend configuration.
+
+From the repository root, run:
+
+```bash
+docker compose up --build
+```
+
+The services will be available at:
+
+- Frontend: [http://localhost:3000](http://localhost:3000)
+- Backend health: [http://localhost:8000/health](http://localhost:8000/health)
+- FastAPI documentation: [http://localhost:8000/docs](http://localhost:8000/docs)
+
+The frontend waits for the backend health check before starting. Generated JSON
+reports are stored in the persistent `interview_data` Docker volume.
+
+Stop the application with `Ctrl+C`, followed by:
+
+```bash
+docker compose down
+```
+
+The named volume is retained by default. Running `docker compose down -v` also
+deletes the saved interview reports.
