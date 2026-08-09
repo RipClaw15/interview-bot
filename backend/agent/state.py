@@ -3,9 +3,9 @@ from langchain_core.messages import BaseMessage
 from typing import Annotated, Any, List, Literal, NotRequired, TypedDict
 
 from langgraph.graph.message import add_messages
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
-
+MAX_INTERVIEW_QUESTIONS = 4
 HINT_STRATEGIES = {
     0:"Use a real-world analogy to explain the concept. Then ask a broad open question to probe understanding. Do NOT give the answer.",
     1:"Give a narrower hint that points directly at the gap in their understanding. Ask a more specific follow-up question. Do NOT give the answer.",
@@ -36,9 +36,21 @@ class ChatRequest(BaseModel):
 
     message: str = Field(..., min_length=1, max_length=1000)
     topic: str = Field(default="", max_length=100)
+    question_number: int = Field(
+        default=0,
+        ge=0,
+        le=MAX_INTERVIEW_QUESTIONS,
+    )
+    interview_complete: bool = False
+
     hint_level: int = Field(default=0, ge=0, le=3)
     misconception: str = Field(default="", max_length=500)
     resolved: bool = False
     history: List[HistoryMessage] = Field(default_factory=list, max_length=50)
     session_id: str = Field(default="", max_length=36)
     provider: Literal["ollama", "groq", "gemini"] = "groq"
+
+class EmailInterviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    email: EmailStr

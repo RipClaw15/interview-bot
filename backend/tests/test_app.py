@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from fastapi import UploadFile
+from fastapi import HTTPException, UploadFile
 from langchain_core.messages import AIMessage, HumanMessage
 
 import app as app_module
@@ -18,6 +18,8 @@ from app import (
     cleanup_expired_sessions,
     deserialize_history,
 )
+
+from agent.state import EmailInterviewRequest
 
 
 class DeserializeHistoryTests(unittest.TestCase):
@@ -72,6 +74,88 @@ class SessionCleanupTests(unittest.TestCase):
         self.assertNotIn("expired", app_module.sessions)
         self.assertTrue(vectorstore.deleted)
 
+class EmailInterviewEndpointTests(unittest.IsolatedAsyncioTestCase):
+    def get_handler(self):
+        return getattr(
+            app_module.email_interview,
+            "__wrapped__",
+            app_module.email_interview,
+        )
+
+    async def test_sends_saved_interview_email(self):
+        interview_id = "00000000-0000-0000-0000-000000000001"
+        body = EmailInterviewRequest(email="candidate@example.com")
+
+        with patch.object(
+            app_module,
+            "send_interview_email",
+            return_value="email_123",
+        ) as mock_send:
+            result = await self.get_handler()(
+                request=Mock(),
+                interview_id=interview_id,
+                body=body,
+            )
+
+        self.assertEqual(
+            result,
+            {
+                "status": "sent",
+                "email_id": "email_123",
+            },
+        )
+        mock_send.assert_called_once_with(
+            interview_id,
+            "candidate@example.com",
+        )
+
+    async def test_returns_404_when_interview_does_not_exist(self):
+        body = EmailInterviewRequest(email="candidate@example.com")
+
+        with patch.object(
+            app_module,
+            "send_interview_email",
+            side_effect=FileNotFoundError,
+        ):
+            with self.assertRaises(HTTPException) as context:
+                await self.get_handler()(
+                    request=Mock(),
+                    interview_id=(
+                        "00000000-0000-0000-0000-000000000001"
+                    ),
+                    body=body,
+                )
+
+        self.assertEqual(context.exception.status_code, 404)
+        self.assertEqual(
+            context.exception.detail,
+            "Interview not found.",
+        )
+
+    async def test_returns_503_when_email_is_not_configured(self):
+        body = EmailInterviewRequest(email="candidate@example.com")
+
+        with patch.object(
+            app_module,
+            "send_interview_email",
+            side_effect=ValueError(
+                "RESEND_API_KEY is not configured."
+            ),
+        ):
+            with self.assertRaises(HTTPException) as context:
+                await self.get_handler()(
+                    request=Mock(),
+                    interview_id=(
+                        "00000000-0000-0000-0000-000000000001"
+                    ),
+                    body=body,
+                )
+
+        self.assertEqual(context.exception.status_code, 503)
+        self.assertEqual(
+            context.exception.detail,
+            "Email delivery is not configured.",
+        )
 
 class UploadTests(unittest.IsolatedAsyncioTestCase):
     def tearDown(self):

@@ -2,71 +2,55 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import WelcomeModal from "@/components/WelcomeModal";
+
 
 const SUGGESTIONS = [
-  "Explain recursion",
-  "How does a hash table work?",
-  "What is Big O notation?",
-  "Explain binary search",
-  "What are linked lists?",
+  "AI in the workplace",
+  "Productivity tools",
+  "Scientific research",
+  "Remote work",
+  "The future of education",
 ];
 
 export default function LandingPage() {
   const router = useRouter();
-  const [provider, setProvider] = useState<"groq" | "gemini">("groq");
+
   const [hoveredSuggestion, setHoveredSuggestion] = useState<string | null>(null);
 
   function startChat(prefill?: string) {
     const params = new URLSearchParams();
-    params.set("provider", provider);
+
     if (prefill) params.set("q", prefill);
     router.push(`/chat?${params.toString()}`);
   }
 
   return (
     <main className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center px-6 py-16">
-      <WelcomeModal />
+
       {/* Title */}
       <div className="text-center mb-12 animate-fade-in">
         <p className="text-zinc-500 text-xs tracking-[0.3em] uppercase mb-4">
-          AI-Powered Learning
+          AI-Powered Conversations
         </p>
         <h1 className="text-5xl font-bold text-white tracking-tight mb-4">
-          CS Tutor
+          Mini AI Interviewer
         </h1>
         <p className="text-zinc-400 text-lg max-w-md mx-auto leading-relaxed">
-          Learn by thinking, not copying. A Socratic tutor that guides you
-          toward answers instead of giving them away.
+
+
+          Choose a topic and take part in a short, adaptive interview.
+          The AI asks one question at a time and summarizes your perspective at the end.
+
+
         </p>
       </div>
 
-      {/* Provider selector */}
-      <div className="mb-10 w-full max-w-sm">
-        <p className="text-zinc-500 text-xs text-center mb-3 tracking-widest uppercase">
-          Choose your AI
-        </p>
-        <div className="grid grid-cols-2 gap-3">
-          {(["groq", "gemini"] as const).map((p) => (
-            <button
-              key={p}
-              onClick={() => setProvider(p)}
-              className={`py-3 px-4 rounded-xl border text-sm font-medium transition-all ${
-                provider === p
-                  ? "border-white text-white bg-white/10"
-                  : "border-zinc-800 text-zinc-500 hover:border-zinc-600 hover:text-zinc-300"
-              }`}
-            >
-              {p === "groq" ? "⚡ Groq" : "✦ Gemini"}
-            </button>
-          ))}
-        </div>
-      </div>
+
 
       {/* Suggestions */}
       <div className="mb-10 w-full max-w-lg">
         <p className="text-zinc-500 text-xs text-center mb-3 tracking-widest uppercase">
-          Try one of these
+          Popular topics
         </p>
         <div className="flex flex-wrap gap-2 justify-center">
           {SUGGESTIONS.map((s) => (
@@ -92,7 +76,7 @@ export default function LandingPage() {
         onClick={() => startChat()}
         className="px-8 py-3 rounded-xl bg-white text-zinc-950 text-sm font-semibold hover:bg-zinc-200 transition-colors mb-16"
       >
-        Start Chatting →
+        Start Interview →
       </button>
 
       {/* About */}
@@ -101,13 +85,13 @@ export default function LandingPage() {
           About
         </p>
         <p className="text-zinc-400 text-sm leading-relaxed">
-          Built with FastAPI, LangGraph, and Next.js. Uses a multi-node state
-          machine to track understanding, escalate hints, and execute code via
-          Judge0. Supports PDF upload for personalized RAG-based tutoring.
+          A short, adaptive interviewing experience built with Next.js,
+          FastAPI, and Groq. Each interview explores one topic through
+          thoughtful follow-up questions and concludes with a concise summary.
         </p>
         <div className="flex gap-4 justify-center mt-6">
           <a
-            href="https://github.com/RipClaw15/Tutor-Chatbot"
+            href="https://github.com/RipClaw15/interview-bot"
             target="_blank"
             rel="noopener noreferrer"
             className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"

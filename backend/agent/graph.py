@@ -1,59 +1,12 @@
 import json
-import os
 
-from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage
-from langgraph.graph import StateGraph, END
-from langchain_ollama import ChatOllama
+from langgraph.graph import END, StateGraph
 from pydantic import BaseModel, Field, StrictBool, ValidationError
 
+from .llm import get_llm
+from .prompts import ASSESS_UNDERSTANDING_PROMPT, EXTRACT_TOPIC_PROMPT
 from .state import TutorState
-
-from .prompts import EXTRACT_TOPIC_PROMPT, ASSESS_UNDERSTANDING_PROMPT
-
-load_dotenv()
-
-
-def get_llm(provider: str | None = None):
-    if provider is None:
-        provider = os.getenv("LLM_PROVIDER", "groq")
-
-    default_models = {
-        "ollama": "llama3.2",
-        "groq": "llama-3.3-70b-versatile",
-        "gemini": "gemini-2.5-flash-lite",
-    }
-    configured_provider = os.getenv("LLM_PROVIDER")
-    configured_model = os.getenv("LLM_MODEL")
-    model = (
-        os.getenv(f"{provider.upper()}_MODEL")
-        or (configured_model if configured_provider == provider else None)
-        or default_models.get(provider)
-    )
-
-    if provider == "ollama":
-        return ChatOllama(model=model, temperature=0.4)
-    if provider == "groq":
-        from langchain_groq import ChatGroq
-
-        api_key = os.getenv("GROQ_API_KEY")
-        if not api_key:
-            raise ValueError(
-                "GROQ_API_KEY is not configured. Add it to backend/.env "
-                "and restart the backend."
-            )
-        return ChatGroq(model=model, temperature=0.4, groq_api_key=api_key)
-    if provider == "gemini":
-        from langchain_google_genai import ChatGoogleGenerativeAI
-
-        if not os.getenv("GOOGLE_API_KEY"):
-            raise ValueError(
-                "GOOGLE_API_KEY is not configured. Add it to backend/.env "
-                "and restart the backend."
-            )
-        return ChatGoogleGenerativeAI(model=model, temperature=0.4)
-
-    raise ValueError(f"Unknown provider: {provider}")
 
 
 class AssessmentResult(BaseModel):

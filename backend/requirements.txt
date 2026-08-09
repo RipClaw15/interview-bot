@@ -17,3 +17,5 @@ httpx
 pypdf
 python-multipart
 fastembed
+resend
+email-validator

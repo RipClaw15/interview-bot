@@ -1,9 +1,7 @@
 "use client";
 
-import {useState, useRef, useEffect} from "react";
-import emailjs from "@emailjs/browser";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useTutorConsent } from "@/lib/consent";
 
 interface Message {
   id: string;
@@ -12,19 +10,18 @@ interface Message {
   includeInHistory?: boolean;
 }
 
-interface TutorState {
+interface InterviewState {
     topic: string;
-    hint_level: number;
-    misconceptions: string;
-    resolved: boolean;
+    questionNumber: number;
+    complete: boolean;
+    interviewId: string;
 }
 
 interface TutorChatProps {
   initialMessage?: string;
-  provider?: "groq" | "gemini";
 }
 
-type Provider = NonNullable<TutorChatProps["provider"]>;
+
 
 const BACKEND_URL =
   process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
@@ -42,22 +39,22 @@ function newMessage(
   };
 }
 
-export default function TutorChat({ initialMessage = "", provider = "groq" }: TutorChatProps) {
+export default function TutorChat({ initialMessage = ""}: TutorChatProps) {
   const [messages, setMessages]   = useState<Message[]>([]);
   const [input, setInput]         = useState(initialMessage);
   const [streaming, setStreaming] = useState(false);
-  const [activeProvider, setActiveProvider] = useState<Provider>(provider);
-  const [state, setState]         = useState<TutorState>({
+  const [state, setState]         = useState<InterviewState>({
       topic: "",
-      hint_level: 0,
-      misconceptions: "",
-      resolved: false,
+      questionNumber: 0,
+      complete: false,
+      interviewId: "",
   });
   const [sessionId, setSessionId]     = useState("");
   const [uploading, setUploading]     = useState(false);
   const [docUploaded, setDocUploaded] = useState(false);
-  const [isSending, setIsSending] = useState(false);
-  const consent = useTutorConsent() === true;
+  const [email, setEmail] = useState("");
+  const [emailStatus, setEmailStatus] = useState("");
+  const [isSendingEmail, setIsSendingEmail] = useState(false);
 
   const bottomRef   = useRef<HTMLDivElement>(null);
   const inputRef    = useRef<HTMLTextAreaElement>(null);
@@ -73,7 +70,7 @@ export default function TutorChat({ initialMessage = "", provider = "groq" }: Tu
 
 async function send() {
     const text = input.trim();
-    if (!text || streaming || uploading) return;
+    if (!text || streaming || uploading || state.complete) return;
 
     const userMessage = newMessage("user", text);
     const assistantMessage = newMessage("assistant", "");
@@ -89,19 +86,18 @@ async function send() {
     abortRef.current = new AbortController();
 
     try {
-      const res = await fetch(`${BACKEND_URL}/chat`, {
+      const res = await fetch(`${BACKEND_URL}/interview`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         signal: abortRef.current.signal,
         body: JSON.stringify({
-          message: text,
-          history,
-          topic: state.topic,
-          hint_level: state.hint_level,
-          misconception: state.misconceptions,
-          resolved: state.resolved,
-          session_id: sessionId,
-          provider: activeProvider,
+            message: text,
+            history,
+            topic: state.topic,
+            question_number: state.questionNumber,
+            interview_complete: state.complete,
+            session_id: sessionId,
+            provider: "groq",
         }),
       });
 
@@ -148,12 +144,12 @@ async function send() {
             }
 
             if (event.type === "state") {
-              setState({
+              setState((prevousState) => ({
                 topic:         event.topic,
-                hint_level:    event.hint_level,
-                misconceptions: event.misconception,
-                resolved:      event.resolved,
-              });
+                questionNumber: event.question_number,
+                complete: event.interview_complete,
+                interviewId: event.interview_id ?? prevousState.interviewId,
+              }));
             }
 
             if (event.type === "error") {
@@ -212,50 +208,73 @@ async function send() {
     uploadAbortRef.current?.abort();
     const previousSessionId = sessionId;
     setMessages([]);
-    setState({ topic: "", hint_level: 0, misconceptions: "", resolved: false });
+    setState({ topic: "", questionNumber: 0, complete: false, interviewId: "", });
     setInput("");
     setStreaming(false);
     setUploading(false);
     setSessionId("");
     setDocUploaded(false);
+    setEmail("");
+    setEmailStatus("");
+    setIsSendingEmail(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
     void releaseDocumentSession(previousSessionId);
   }
 
-  const sendReport = async () => {
-  if (isSending) return;
-  if (messages.length === 0) {
-    alert("No conversation to report.");
+  async function sendSummaryEmail() {
+  if (isSendingEmail || !state.interviewId) return;
+
+  const recipient = email.trim();
+
+  if (!recipient) {
+    setEmailStatus("Enter an email address.");
     return;
   }
 
-  setIsSending(true);
-  try {
-    // Format conversation for email
-    let conversationLog = "";
-    messages.forEach((msg) => {
-      const role = msg.role === "user" ? "👤 User" : "🤖 AI Tutor";
-      conversationLog += `${role}:\n${msg.content}\n\n---\n\n`;
-    });
+  setIsSendingEmail(true);
+  setEmailStatus("");
 
-    await emailjs.send(
-      process.env.NEXT_PUBLIC_EMAILJS_SERVICE_ID!,
-      process.env.NEXT_PUBLIC_EMAILJS_TEMPLATE_ID!,
+  try {
+    const response = await fetch(
+      `${BACKEND_URL}/interviews/${encodeURIComponent(state.interviewId)}/email`,
       {
-        conversation_log: conversationLog,
-        date: new Date().toLocaleString(),
-        user_id: "anonymous",
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email: recipient,
+        }),
       },
-      process.env.NEXT_PUBLIC_EMAILJS_PUBLIC_KEY!
     );
-    alert("✅ Report sent! Thank you for your help.");
+
+    if (!response.ok) {
+      let detail = `Email could not be sent (${response.status}).`;
+
+      try {
+        const errorBody = await response.json();
+        if (typeof errorBody.detail === "string") {
+          detail = errorBody.detail;
+        }
+      } catch {
+        // Keep the status-based fallback.
+      }
+
+      throw new Error(detail);
+    }
+
+    setEmailStatus("Summary sent ✓");
   } catch (error) {
-    console.error("EmailJS error:", error);
-    alert("❌ Failed to send report. Please try again later.");
+    setEmailStatus(
+      error instanceof Error
+        ? error.message
+        : "Email could not be sent.",
+    );
   } finally {
-    setIsSending(false);
+    setIsSendingEmail(false);
   }
-};
+}
+
 
 
   // Upload file handler
@@ -301,7 +320,7 @@ async function send() {
           message.id === uploadMessageId
             ? {
                 ...message,
-                content: `✓ "${file.name}" uploaded and indexed. I will now use it to help answer your questions.`,
+                content: `✓ "${file.name}" uploaded and indexed. I will use relevant experience from your CV to personalize the interview.`,
               }
             : message
         )
@@ -330,15 +349,6 @@ async function send() {
 
   // JSX
 
-  const HINT_LABELS: Record<number, {label: string; color: string}> = {
-    0: {label: "Analogy", color: "#10b981"},
-    1: {label: "Hint", color: "#f59e0b"},
-    2: {label: "Leading Q", color: "#f97316"},
-    3: {label: "Revealing", color: "#ef4444"},
-  };
-
-  const hint = HINT_LABELS[state.hint_level];
-
   return (
     <div className="flex h-screen bg-zinc-850 items-center justify-center">
       <div className="flex flex-col w-full max-w-5xl h-[95vh] bg-zinc-900 rounded-2xl border border-zinc-800 overflow-hidden text-zinc-100">
@@ -351,7 +361,7 @@ async function send() {
               aria-label="Back to home"
               className="rounded-md text-lg font-semibold text-white transition-colors hover:text-zinc-300 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
             >
-              CS Tutor
+              Mini AI Interviewer
             </Link>
             {state.topic && (
               <span className="text-xs px-2 py-0.5 rounded bg-zinc-800 text-zinc-400">
@@ -360,35 +370,26 @@ async function send() {
             )}
           </div>
           <div className="flex items-center gap-4">
-            <label className="flex items-center gap-2 text-xs text-zinc-400">
-              <span className="sr-only">AI model</span>
-              <select
-                aria-label="AI model"
-                value={activeProvider}
-                onChange={(event) =>
-                  setActiveProvider(event.target.value as Provider)
-                }
-                disabled={streaming}
-                className="rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-200 outline-none transition-colors hover:border-zinc-500 focus:border-zinc-500 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <option value="groq">Groq · Llama 3.3 70B</option>
-                <option value="gemini">Gemini · 2.5 Flash Lite</option>
-              </select>
-            </label>
-            {state.topic && (
-              <div className="flex items-center gap-2 text-xs">
-                <span
-                  className="w-2 h-2 rounded-full"
-                  style={{ backgroundColor: hint.color }}
-                />
-                <span className="text-zinc-400">{hint.label}</span>
-              </div>
+          {state.complete && state.interviewId && (
+            <span
+              className="text-xs text-green-500"
+              title={`Interview ID: ${state.interviewId}`}
+            >
+              Saved ✓
+            </span>
+          )}
+          {state.questionNumber > 0 && (
+            <span className="text-xs text-zinc-400">
+              {state.complete
+                ? "Interview complete"
+                : `Question ${state.questionNumber} of 4`}
+            </span>
             )}
             <button
               onClick={reset}
               className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
             >
-              new session
+              new interview
             </button>
           </div>
         </header>
@@ -398,11 +399,15 @@ async function send() {
           {messages.length === 0 && (
             <div className="flex flex-col items-center justify-center h-full gap-4 text-center">
               <p className="text-zinc-500 text-sm max-w-sm">
-                Ask me to explain any CS concept. I will guide you to the answer
-                with analogies and questions instead of just telling you.
+                Choose a topic and share your perspective through four short questions.
+                The interviewer will adapt its follow-up questions to your answers.
               </p>
               <div className="flex flex-wrap gap-2 justify-center">
-                {["Explain recursion", "How does a hash table work?", "What is Big O notation?"].map((q) => (
+                {[
+                  "AI in the workplace",
+                  "Productivity tools",
+                  "The future of education",
+                  ].map((q) => (
                   <button
                     key={q}
                     onClick={() => { setInput(q); inputRef.current?.focus(); }}
@@ -440,63 +445,104 @@ async function send() {
 
         {/* Input */}
         <div className="px-6 py-4 border-t border-zinc-800">
-          <div className="flex gap-3 items-end">
-            <textarea
-              ref={inputRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Ask a question or answer mine..."
-              rows={5}
-              className="flex-1 resize-y bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 transition-colors"
-              style={{ minHeight: "80px", maxHeight: "300px" }}
-            />
+          {state.complete && state.interviewId && (
+                  <div className="mb-4 rounded-xl border border-zinc-700 bg-zinc-800/40 p-4">
+                    <p className="text-sm font-medium text-zinc-100">
+                      Email your interview result
+                    </p>
+                    <p className="mt-1 text-xs text-zinc-400">
+                      Receive the summary and complete JSON transcript.
+                    </p>
 
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".pdf"
-              onChange={handleUpload}
-              className="hidden"
-              aria-label="Upload PDF document"
-            />
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploading || streaming}
-              className={`px-4 py-3 rounded-xl text-sm font-medium transition-colors border ${
-                docUploaded
-                  ? "border-green-500 text-green-500"
-                  : "border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-zinc-200"
-              } disabled:opacity-30 disabled:cursor-not-allowed`}
-            >
-              {uploading ? "..." : docUploaded ? "Doc ✓" : "Upload"}
-            </button>
+                    <form
+                      className="mt-3 flex flex-col gap-2 sm:flex-row"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        void sendSummaryEmail();
+                      }}
+                    >
+                      <input
+                        type="email"
+                        required
+                        value={email}
+                        onChange={(event) => {
+                          setEmail(event.target.value);
+                          setEmailStatus("");
+                        }}
+                        placeholder="you@example.com"
+                        aria-label="Email address for interview results"
+                        className="min-w-0 flex-1 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-600 focus:border-zinc-500 focus:outline-none"
+                      />
 
-            <button
-              onClick={send}
-              disabled={streaming || uploading || !input.trim()}
-              className="px-4 py-3 rounded-xl bg-white text-zinc-950 text-sm font-medium hover:bg-zinc-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-            >
-              {streaming ? "..." : "Send"}
-            </button>
+                      <button
+                        type="submit"
+                        disabled={isSendingEmail || !email.trim()}
+                        className="rounded-lg bg-white px-4 py-2 text-sm font-medium text-zinc-950 transition-colors hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-30"
+                      >
+                        {isSendingEmail ? "Sending..." : "Send summary"}
+                      </button>
+                    </form>
+
+                    {emailStatus && (
+                      <p className="mt-2 text-xs text-zinc-400" role="status">
+                        {emailStatus}
+                      </p>
+                    )}
+                  </div>
+                )}
+            <div className="flex gap-3 items-end">
+              <textarea
+                ref={inputRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                disabled={state.complete}
+                placeholder={
+                    state.complete
+                      ? "Interview complete"
+                      : state.questionNumber === 0
+                        ? "Enter an interview topic..."
+                        : "Write your answer..."
+                }
+                rows={5}
+                className="flex-1 resize-y bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 transition-colors"
+                style={{ minHeight: "80px", maxHeight: "300px" }}
+              />
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf"
+                onChange={handleUpload}
+                className="hidden"
+                aria-label="Upload CV as a PDF"
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading || streaming || state.complete}
+                className={`px-4 py-3 rounded-xl text-sm font-medium transition-colors border ${
+                  docUploaded
+                    ? "border-green-500 text-green-500"
+                    : "border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-zinc-200"
+                } disabled:opacity-30 disabled:cursor-not-allowed`}
+              >
+                {uploading ? "..." : docUploaded ? "CV ✓" : "Upload CV"}
+              </button>
+
+              <button
+                onClick={send}
+                disabled={streaming || uploading || state.complete || !input.trim()}
+                className="px-4 py-3 rounded-xl bg-white text-zinc-950 text-sm font-medium hover:bg-zinc-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              >
+                {state.complete ? "Complete" : streaming ? "..." : "Send"}
+              </button>
           </div>
           <p className="text-xs text-zinc-600 mt-2">
             Enter to send · Shift+Enter for new line
           </p>
         </div>
-        {/* Send Report button (only if user consented) */}
-          {consent && (
-            <button
-              onClick={sendReport}
-              disabled={isSending}
-              className="fixed bottom-4 right-4 bg-red-600 text-white px-4 py-2 rounded-full shadow-lg hover:bg-red-700 disabled:opacity-50 z-50"
-            >
-              {isSending ? "Sending..." : "📧 Send Report"}
-            </button>
-          )}
 
       </div>
     </div>
   );
 }
-

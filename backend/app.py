@@ -1,5 +1,6 @@
 import asyncio
 from dataclasses import dataclass
+import logging
 import json
 import os
 import tempfile
@@ -12,17 +13,34 @@ from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from resend.exceptions import ResendError
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
-from agent.graph import assessment_graph, get_llm
+from agent.emailer import send_interview_email
+from agent.graph import assessment_graph
+from agent.interview import (
+    build_question_prompt,
+    build_summary_prompt,
+    get_next_interview_action,
+)
+from agent.llm import get_llm
 from agent.rag.indexer import build_index
 from agent.rag.retriever import get_relevant_context
-from agent.state import ChatRequest, HistoryMessage, HINT_STRATEGIES, TutorState
+from agent.state import (
+    ChatRequest,
+    EmailInterviewRequest,
+    HistoryMessage,
+    HINT_STRATEGIES,
+    TutorState,
+)
+from agent.storage import save_interview
 from agent.tools import contains_code, detect_language, execute_code, extract_code
 
 load_dotenv()
+logger = logging.getLogger(__name__)
+
 
 MAX_UPLOAD_BYTES = max(
     1,
@@ -49,7 +67,7 @@ class DocumentSession:
     created_at: float
 
 
-app = FastAPI(title="CS Tutor Agent")
+app = FastAPI(title="Interview Bot")
 sessions: dict[str, DocumentSession] = {}
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
@@ -334,6 +352,166 @@ Rules:
             )
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@app.post("/interview")
+@limiter.limit("10/minute")
+async def interview(request: Request, body: ChatRequest):
+    if body.interview_complete:
+        raise HTTPException(
+            status_code=409,
+            detail="This interview is already complete.",
+        )
+
+    if body.question_number == 0:
+        topic = body.topic.strip() or body.message.strip()
+    else:
+        topic = body.topic.strip()
+
+    if not topic:
+        raise HTTPException(
+            status_code=400,
+            detail="An interview topic is required.",
+        )
+
+    if len(topic) > 100:
+        raise HTTPException(
+            status_code=400,
+            detail="The interview topic must be 100 characters or fewer.",
+        )
+
+    try:
+        llm = get_llm()
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    await asyncio.to_thread(cleanup_expired_sessions)
+
+    history = deserialize_history(body.history)
+    messages = history + [HumanMessage(content=body.message)]
+
+    action, next_question_number = get_next_interview_action(
+        body.question_number
+    )
+
+    rag_context = ""
+    if action == "question" and body.session_id:
+        session = sessions.get(body.session_id)
+
+        if session is not None:
+            retrieval_query = f"{topic}\n{body.message}"
+            rag_context = await asyncio.to_thread(
+                get_relevant_context,
+                session.vectorstore,
+                retrieval_query,
+            )
+
+    if action == "summary":
+        prompt = build_summary_prompt(
+            topic=topic,
+            messages=messages,
+        )
+        interview_complete = True
+    else:
+        prompt = build_question_prompt(
+            topic=topic,
+            question_number=next_question_number,
+            messages=messages,
+            cv_context=rag_context,
+        )
+        interview_complete = False
+
+    async def interview_stream():
+        response_parts = []
+
+        try:
+            async for chunk in llm.astream(
+                [SystemMessage(content=prompt)]
+            ):
+                token = chunk.content
+                if token:
+                    response_parts.append(token)
+                    yield (
+                        "data: "
+                        f"{json.dumps({'type': 'token', 'content': token})}\n\n"
+                    )
+
+            interview_id = None
+
+            if interview_complete:
+                summary = "".join(response_parts).strip()
+                interview_id = await asyncio.to_thread(
+                    save_interview,
+                    topic,
+                    messages,
+                    summary,
+                )
+
+            state_event = {
+                "type": "state",
+                "topic": topic,
+                "question_number": next_question_number,
+                "interview_complete": interview_complete,
+                "interview_id": interview_id,
+            }
+            yield f"data: {json.dumps(state_event)}\n\n"
+            yield "data: [DONE]\n\n"
+        except Exception:
+            error_event = {
+                "type": "error",
+                "content": "The interviewer could not complete this response.",
+            }
+            yield f"data: {json.dumps(error_event)}\n\n"
+
+    return StreamingResponse(
+        interview_stream(),
+        media_type="text/event-stream",
+    )
+
+
+@app.post("/interviews/{interview_id}/email")
+@limiter.limit("3/hour")
+async def email_interview(
+    request: Request,
+    interview_id: str,
+    body: EmailInterviewRequest,
+):
+    try:
+        email_id = await asyncio.to_thread(
+            send_interview_email,
+            interview_id,
+            str(body.email),
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail="Interview not found.",
+        ) from exc
+    except ValueError as exc:
+        if "RESEND_API_KEY" in str(exc):
+            raise HTTPException(
+                status_code=503,
+                detail="Email delivery is not configured.",
+            ) from exc
+
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid interview ID.",
+        ) from exc
+    except ResendError as exc:
+        logger.exception(
+            "Resend failed for interview %s",
+            interview_id,
+        )
+        raise HTTPException(
+            status_code=502,
+            detail="The email provider could not send this message.",
+        ) from exc
+
+    return {
+        "status": "sent",
+        "email_id": email_id,
+    }
 
 
 @app.get("/health")

@@ -1,76 +1,125 @@
-# Tutor Chatbot
+# Mini AI Interviewer
 
-A Socratic-style AI tutor for CS and programming concepts. Instead of giving you the answer directly, it guides you toward understanding through analogies, hints, and leading questions. Supports PDF upload for personalized tutoring based on your own study material.
+An AI-powered interview application that conducts a focused four-question
+conversation, adapts its questions to the participant's answers, and produces a
+final summary with the complete transcript.
+
+Participants can optionally upload a CV as a PDF. Relevant experience is
+retrieved from the document and supplied to the interviewer, allowing the
+conversation to be personalized without making CV upload mandatory.
+
+## Features
+
+- Topic-based interviews with four adaptive questions
+- Streaming responses from Groq
+- Optional CV upload and retrieval-augmented generation (RAG)
+- Final interview summary generated from the conversation
+- Transcript and summary saved as a JSON report
+- Optional report delivery by email with a JSON attachment
+- Request validation, upload limits, session cleanup, and rate limiting
+- Responsive Next.js interface
 
 ## How it works
 
-The backend uses a LangGraph state machine that runs on every message:
+```mermaid
+flowchart LR
+    U["Participant"] --> F["Next.js frontend"]
+    F --> B["FastAPI backend"]
+    B --> G["Groq LLM"]
+    C["Optional CV PDF"] --> R["Chroma + FastEmbed RAG"]
+    R --> B
+    B --> J["Saved JSON report"]
+    J --> E["Resend email delivery"]
+```
 
-1. **extract_topic** — extracts the concept the student wants to learn, updates if the topic changes
-2. **assess_understanding** — evaluates the conversation, updates hint level and misconception tracking
-3. **choose_strategy** — determines the response approach based on the current hint level
+1. The participant chooses an interview topic.
+2. The backend asks four numbered questions and adapts them to previous answers.
+3. If a CV was uploaded, relevant document chunks can guide the questions.
+4. After the final answer, Groq generates a structured summary.
+5. The transcript and summary are saved as a JSON file with a unique interview
+   ID.
+6. The completed report can optionally be emailed through Resend.
 
-The hint system escalates with each wrong or confused answer:
+## Tech stack
 
-| Level | Strategy |
-|-------|----------|
-| 0 | Real-world analogy + broad question |
-| 1 | Narrower hint pointing at the gap |
-| 2 | Leading question that almost gives it away |
-| 3 | Full answer revealed with explanation |
+| Layer | Technologies |
+| --- | --- |
+| Frontend | Next.js 16, React 19, TypeScript, Tailwind CSS |
+| Backend | Python 3.11, FastAPI, LangChain |
+| LLM | Groq (`llama-3.3-70b-versatile` by default) |
+| RAG | ChromaDB, FastEmbed, PyPDF |
+| Email | Resend |
+| Persistence | Local JSON files |
 
-When the student submits code, it is automatically executed via the Judge0 API and the actual output is passed to the tutor for more accurate feedback.
+## Project structure
 
-When a PDF is uploaded, the document is chunked, embedded, and stored in an in-memory ChromaDB vector store. Relevant chunks are retrieved on every message and added to the tutor's context.
-
-## Tech Stack
-
-**Backend:** Python, FastAPI, LangChain, LangGraph, ChromaDB, HuggingFace Embeddings
-
-**LLM Providers:** Groq (llama-3.3-70b-versatile), Gemini (gemini-2.5-flash-lite)
-
-**Code Execution:** Judge0 API
-
-**Frontend:** Next.js, Tailwind CSS
+```text
+interview-bot/
+├── backend/
+│   ├── agent/
+│   │   ├── emailer.py       # Resend report delivery
+│   │   ├── interview.py     # Interview flow and prompt builders
+│   │   ├── llm.py           # Groq model configuration
+│   │   ├── prompts.py       # Interview prompt templates
+│   │   ├── rag/             # PDF indexing and retrieval
+│   │   ├── state.py         # Request and state models
+│   │   └── storage.py       # JSON transcript persistence
+│   ├── tests/
+│   ├── app.py               # FastAPI routes and streaming
+│   └── requirements.txt
+├── frontend/
+│   ├── app/
+│   │   ├── chat/            # Interview page
+│   │   ├── components/      # Interview chat component
+│   │   └── page.tsx         # Landing page
+│   └── package.json
+└── README.md
+```
 
 ## Prerequisites
 
-- Python 3.11+
-- Node.js
-- Groq API key — free at [console.groq.com](https://console.groq.com)
-- Google API key — free at [aistudio.google.com](https://aistudio.google.com) (optional, for Gemini)
+- Python 3.11 or newer
+- Node.js 22 LTS
+- A [Groq API key](https://console.groq.com/keys)
+- Optional: a [Resend API key](https://resend.com/api-keys) for email delivery
 
-## Running locally
+## Run locally
 
-### Backend
+### 1. Backend
 
 ```bash
 cd backend
 python3 -m venv venv
-
-# Mac/Linux
 source venv/bin/activate
-
-# Windows PowerShell
-.\venv\Scripts\Activate.ps1
-
 python -m pip install -r requirements.txt
 ```
 
-Create a `.env` file in the backend folder:
-LLM_PROVIDER=groq
-LLM_MODEL=llama-3.3-70b-versatile
-GROQ_API_KEY=your_key_here
-Optional - for Gemini support
-GOOGLE_API_KEY=your_key_here
+Create `backend/.env`:
 
-Start the server:
+```env
+GROQ_API_KEY=your_groq_api_key
+GROQ_MODEL=llama-3.3-70b-versatile
 
-```bash
-python -m uvicorn app:app --reload
+# Optional email delivery
+RESEND_API_KEY=your_resend_api_key
+EMAIL_FROM="AI Interviewer <results@mail.yourdomain.com>"
+
+# Browser and upload configuration
+ALLOWED_ORIGINS=["http://localhost:3000"]
+MAX_UPLOAD_BYTES=10485760
+MAX_DOCUMENT_SESSIONS=100
+SESSION_TTL_SECONDS=3600
 ```
 
-### Frontend
+Start the API:
+
+```bash
+python -m uvicorn app:app --reload --host 127.0.0.1 --port 8000
+```
+
+### 2. Frontend
+
+In a second terminal:
 
 ```bash
 cd frontend
@@ -78,55 +127,63 @@ npm install
 npm run dev
 ```
 
-Copy `frontend/env.example` to `frontend/.env.local` and adjust the backend URL
-if it is not running on `http://localhost:8000`.
+The frontend uses `http://localhost:8000` by default. To use another backend,
+create `frontend/.env.local`:
 
-Open `http://localhost:3000`.
+```env
+NEXT_PUBLIC_BACKEND_URL=http://127.0.0.1:8000
+```
 
-## Project Structure
-TutorChatAgent/
+Open [http://localhost:3000](http://localhost:3000).
 
-├── backend/
+## Email configuration
 
-│   ├── app.py              # FastAPI app, endpoints, streaming
+The Resend testing sender (`onboarding@resend.dev`) can only send to the email
+address associated with the Resend account. Sending reports to other recipients
+requires a verified sender domain and an `EMAIL_FROM` address using that exact
+domain.
 
-│   ├── requirements.txt
+The application stores API keys only in backend environment variables. Never
+place `GROQ_API_KEY` or `RESEND_API_KEY` in a `NEXT_PUBLIC_` variable.
 
-│   └── agent/
+## API endpoints
 
-│       ├── graph.py        # LangGraph nodes and assessment graph
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `POST` | `/interview` | Stream the next question or final summary |
+| `POST` | `/upload` | Upload and index an optional CV PDF |
+| `DELETE` | `/sessions/{session_id}` | Release an uploaded-document session |
+| `POST` | `/interviews/{interview_id}/email` | Email a saved interview report |
+| `GET` | `/health` | Check backend health and model configuration |
 
-│       ├── state.py        # TutorState, ChatRequest models
+## Tests
 
-│       ├── prompts.py      # All LLM prompt templates
+Backend:
 
-│       ├── tools.py        # Judge0 code execution, language detection
+```bash
+cd backend
+source venv/bin/activate
+python -m unittest discover -s tests -v
+```
 
-│       └── rag/
+Frontend:
 
-│           ├── indexer.py  # PDF ingestion and ChromaDB indexing
+```bash
+cd frontend
+npm run lint
+npm run build
+```
 
-│           └── retriever.py # Semantic search over uploaded documents
+Generated interview reports are stored under `backend/data/interviews/` by
+default. This directory, local environment files, virtual environments, and
+frontend build artifacts are excluded from Git.
 
-└── frontend/
+## Deployment plan
 
-└── app/
+- Deploy the Next.js frontend to Vercel.
+- Deploy the FastAPI backend to Railway.
+- Configure production environment variables on each platform.
+- Add Dockerfiles and a Docker Compose setup for local orchestration.
 
-├── page.tsx        # Landing page
-
-├── chat/
-
-│   └── page.tsx    # Chat route
-
-└── components/
-
-└── TutorChat.tsx
-
-## Features
-
-- Socratic tutoring with 4-level hint escalation
-- Automatic code execution via Judge0 (Python, Java, C++, JavaScript and more)
-- PDF upload with RAG — tutor answers based on your actual study material
-- Choice of LLM provider (Groq or Gemini) from the landing page
-- Streaming responses
-- Rate limiting and input validation
+Docker and production deployment are intentionally listed as the next project
+milestones rather than completed features.

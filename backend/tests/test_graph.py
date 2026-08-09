@@ -66,6 +66,10 @@ class ProviderConfigurationTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "GROQ_API_KEY"):
                 get_llm("groq")
 
+    def test_rejects_non_groq_provider(self):
+        with self.assertRaisesRegex(ValueError, "Only the Groq"):
+            get_llm("gemini")
+
 
 class TopicTrackingTests(unittest.TestCase):
     def test_unknown_follow_up_preserves_current_topic(self):

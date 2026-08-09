@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "CS Tutor",
-  description: "A Socratic AI tutor that guides you toward understanding instead of giving answers directly.",
+  title: "Interview Bot",
+  description: "Mini AI Interview Bot based on Anthropics AI Interviewer.",
 };
 
 export default function RootLayout({
