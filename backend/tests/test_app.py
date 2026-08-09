@@ -18,9 +18,7 @@ from app import (
     cleanup_expired_sessions,
     deserialize_history,
 )
-
 from agent.state import EmailInterviewRequest
-
 
 class DeserializeHistoryTests(unittest.TestCase):
     def test_deserializes_supported_roles_and_ignores_unknown_roles(self):
@@ -138,7 +136,7 @@ class EmailInterviewEndpointTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(
             app_module,
             "send_interview_email",
-            side_effect=ValueError(
+            side_effect=app_module.EmailConfigurationError(
                 "RESEND_API_KEY is not configured."
             ),
         ):
@@ -156,7 +154,6 @@ class EmailInterviewEndpointTests(unittest.IsolatedAsyncioTestCase):
             context.exception.detail,
             "Email delivery is not configured.",
         )
-
 class UploadTests(unittest.IsolatedAsyncioTestCase):
     def tearDown(self):
         app_module.sessions.clear()

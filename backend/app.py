@@ -18,7 +18,10 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
-from agent.emailer import send_interview_email
+from agent.emailer import (
+    EmailConfigurationError,
+    send_interview_email,
+)
 from agent.graph import assessment_graph
 from agent.interview import (
     build_question_prompt,
@@ -487,13 +490,13 @@ async def email_interview(
             status_code=404,
             detail="Interview not found.",
         ) from exc
+    except EmailConfigurationError as exc:
+        logger.error("Email configuration error: %s", exc)
+        raise HTTPException(
+            status_code=503,
+            detail="Email delivery is not configured.",
+        ) from exc
     except ValueError as exc:
-        if "RESEND_API_KEY" in str(exc):
-            raise HTTPException(
-                status_code=503,
-                detail="Email delivery is not configured.",
-            ) from exc
-
         raise HTTPException(
             status_code=400,
             detail="Invalid interview ID.",

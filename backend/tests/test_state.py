@@ -43,7 +43,6 @@ class ChatRequestTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             ChatRequest(message="hello", provider="unknown")
 
-
 class EmailInterviewRequestTests(unittest.TestCase):
     def test_rejects_invalid_email_address(self):
         with self.assertRaises(ValidationError):

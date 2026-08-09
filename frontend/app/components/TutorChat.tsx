@@ -446,65 +446,66 @@ async function send() {
         {/* Input */}
         <div className="px-6 py-4 border-t border-zinc-800">
           {state.complete && state.interviewId && (
-                  <div className="mb-4 rounded-xl border border-zinc-700 bg-zinc-800/40 p-4">
-                    <p className="text-sm font-medium text-zinc-100">
-                      Email your interview result
-                    </p>
-                    <p className="mt-1 text-xs text-zinc-400">
-                      Receive the summary and complete JSON transcript.
-                    </p>
+  <div className="mb-4 rounded-xl border border-zinc-700 bg-zinc-800/40 p-4">
+    <p className="text-sm font-medium text-zinc-100">
+      Email your interview result
+    </p>
 
-                    <form
-                      className="mt-3 flex flex-col gap-2 sm:flex-row"
-                      onSubmit={(event) => {
-                        event.preventDefault();
-                        void sendSummaryEmail();
-                      }}
-                    >
-                      <input
-                        type="email"
-                        required
-                        value={email}
-                        onChange={(event) => {
-                          setEmail(event.target.value);
-                          setEmailStatus("");
-                        }}
-                        placeholder="you@example.com"
-                        aria-label="Email address for interview results"
-                        className="min-w-0 flex-1 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-600 focus:border-zinc-500 focus:outline-none"
-                      />
+    <p className="mt-1 text-xs text-zinc-400">
+      Receive the final summary and complete JSON transcript.
+    </p>
 
-                      <button
-                        type="submit"
-                        disabled={isSendingEmail || !email.trim()}
-                        className="rounded-lg bg-white px-4 py-2 text-sm font-medium text-zinc-950 transition-colors hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-30"
-                      >
-                        {isSendingEmail ? "Sending..." : "Send summary"}
-                      </button>
-                    </form>
+    <form
+      className="mt-3 flex flex-col gap-2 sm:flex-row"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void sendSummaryEmail();
+      }}
+    >
+      <input
+        type="email"
+        required
+        value={email}
+        onChange={(event) => {
+          setEmail(event.target.value);
+          setEmailStatus("");
+        }}
+        placeholder="you@example.com"
+        aria-label="Email address for interview results"
+        className="min-w-0 flex-1 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-600 focus:border-zinc-500 focus:outline-none"
+      />
 
-                    {emailStatus && (
-                      <p className="mt-2 text-xs text-zinc-400" role="status">
-                        {emailStatus}
-                      </p>
-                    )}
-                  </div>
-                )}
-            <div className="flex gap-3 items-end">
-              <textarea
-                ref={inputRef}
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                disabled={state.complete}
-                placeholder={
-                    state.complete
-                      ? "Interview complete"
-                      : state.questionNumber === 0
-                        ? "Enter an interview topic..."
-                        : "Write your answer..."
-                }
-                rows={5}
+      <button
+        type="submit"
+        disabled={isSendingEmail || !email.trim()}
+        className="rounded-lg bg-white px-4 py-2 text-sm font-medium text-zinc-950 transition-colors hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-30"
+      >
+        {isSendingEmail ? "Sending..." : "Send summary"}
+      </button>
+    </form>
+
+    {emailStatus && (
+      <p className="mt-2 text-xs text-zinc-400" role="status">
+        {emailStatus}
+      </p>
+    )}
+  </div>
+)}
+                        <div className="flex gap-3 items-end">
+                          <textarea
+                            ref={inputRef}
+                            value={input}
+                            onChange={(e) => setInput(e.target.value)}
+                            onKeyDown={handleKeyDown}
+                            disabled={state.complete}
+                            placeholder={
+                                state.complete
+                                  ? "Interview complete"
+                                  : state.questionNumber === 0
+                                    ? "Enter an interview topic..."
+                                    : "Write your answer..."
+                            }
+                            rows={5}
                 className="flex-1 resize-y bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 transition-colors"
                 style={{ minHeight: "80px", maxHeight: "300px" }}
               />
