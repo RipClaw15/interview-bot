@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
+from email_validator import EmailNotValidError, validate_email
 import resend
 
 from .storage import load_interview
@@ -12,22 +13,37 @@ from .storage import load_interview
 
 load_dotenv()
 
-DEFAULT_EMAIL_FROM = "AI Interviewer <onboarding@resend.dev>"
-
+class EmailConfigurationError(RuntimeError):
+    """Raised when email delivery is not configured correctly."""
 
 def send_interview_email(
     interview_id: str,
     recipient: str,
     data_dir: Path | None = None,
 ) -> str:
-    """Email a saved interview summary and JSON attachment."""
+    """Email a saved interview to the requested recipient."""
     api_key = os.getenv("RESEND_API_KEY")
     if not api_key:
-        raise ValueError(
-            "RESEND_API_KEY is not configured. Add it to backend/.env."
+        raise EmailConfigurationError(
+            "RESEND_API_KEY is not configured."
         )
 
+    sender = os.getenv("EMAIL_FROM", "").strip()
+    if not sender:
+        raise EmailConfigurationError(
+            "EMAIL_FROM is not configured."
+        )
+
+    try:
+        normalized_recipient = validate_email(
+            recipient,
+            check_deliverability=False,
+        ).normalized
+    except EmailNotValidError as exc:
+        raise ValueError("Recipient email is invalid.") from exc
+
     payload = load_interview(interview_id, data_dir=data_dir)
+
     topic = str(payload.get("topic", "AI interview"))
     summary = str(payload.get("summary", ""))
 
@@ -42,8 +58,8 @@ def send_interview_email(
     resend.api_key = api_key
 
     params: resend.Emails.SendParams = {
-        "from": os.getenv("EMAIL_FROM", DEFAULT_EMAIL_FROM),
-        "to": [recipient],
+        "from": sender,
+        "to": [normalized_recipient],
         "subject": f"Your AI interview summary: {topic}",
         "text": (
             "Your AI interview is complete.\n\n"
@@ -60,7 +76,7 @@ def send_interview_email(
     }
 
     recipient_hash = hashlib.sha256(
-        recipient.lower().encode("utf-8")
+        normalized_recipient.lower().encode("utf-8")
     ).hexdigest()[:16]
 
     response = resend.Emails.send(

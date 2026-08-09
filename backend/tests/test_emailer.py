@@ -11,13 +11,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from langchain_core.messages import HumanMessage
 
-from agent.emailer import send_interview_email
+from agent.emailer import (
+    EmailConfigurationError,
+    send_interview_email,
+)
 from agent.storage import save_interview
 
 
 class InterviewEmailTests(unittest.TestCase):
     @patch("agent.emailer.resend.Emails.send")
-    def test_sends_json_attachment(self, mock_send):
+    def test_sends_json_attachment_to_requested_recipient(
+        self,
+        mock_send,
+    ):
         mock_send.return_value = {"id": "email_123"}
 
         with tempfile.TemporaryDirectory() as directory:
@@ -35,8 +41,11 @@ class InterviewEmailTests(unittest.TestCase):
                 os.environ,
                 {
                     "RESEND_API_KEY": "re_test_key",
-                    "EMAIL_FROM": "Interviewer <interviews@example.com>",
+                    "EMAIL_FROM": (
+                        "Interviewer <interviews@mail.company.com>"
+                    ),
                 },
+                clear=True,
             ):
                 email_id = send_interview_email(
                     interview_id=interview_id,
@@ -52,7 +61,7 @@ class InterviewEmailTests(unittest.TestCase):
         self.assertEqual(params["to"], ["candidate@example.com"])
         self.assertEqual(
             params["from"],
-            "Interviewer <interviews@example.com>",
+            "Interviewer <interviews@mail.company.com>",
         )
         self.assertIn(interview_id, options["idempotency_key"])
 
@@ -65,10 +74,37 @@ class InterviewEmailTests(unittest.TestCase):
 
     def test_requires_resend_api_key(self):
         with patch.dict(os.environ, {}, clear=True):
-            with self.assertRaisesRegex(ValueError, "RESEND_API_KEY"):
+            with self.assertRaisesRegex(
+                EmailConfigurationError,
+                "RESEND_API_KEY",
+            ):
                 send_interview_email(
-                    interview_id="00000000-0000-0000-0000-000000000000",
+                    interview_id=(
+                        "00000000-0000-0000-0000-000000000000"
+                    ),
                     recipient="candidate@example.com",
+                )
+
+    def test_rejects_invalid_recipient(self):
+        with patch.dict(
+            os.environ,
+            {
+                "RESEND_API_KEY": "re_test_key",
+                "EMAIL_FROM": (
+                    "Interviewer <interviews@mail.company.com>"
+                ),
+            },
+            clear=True,
+        ):
+            with self.assertRaisesRegex(
+                ValueError,
+                "Recipient email is invalid",
+            ):
+                send_interview_email(
+                    interview_id=(
+                        "00000000-0000-0000-0000-000000000000"
+                    ),
+                    recipient="not-an-email",
                 )
 
 
