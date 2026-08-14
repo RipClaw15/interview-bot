@@ -6,7 +6,7 @@ from langchain_groq import ChatGroq
 
 load_dotenv()
 
-DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile"
+DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b"
 
 
 def get_llm(provider: str | None = None) -> ChatGroq:

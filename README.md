@@ -47,7 +47,7 @@ flowchart LR
 | --- | --- |
 | Frontend | Next.js 16, React 19, TypeScript, Tailwind CSS |
 | Backend | Python 3.11, FastAPI, LangChain |
-| LLM | Groq (`llama-3.3-70b-versatile` by default) |
+| LLM | Groq (`openai/gpt-oss-120b` by default) |
 | RAG | ChromaDB, FastEmbed, PyPDF |
 | Email | Resend |
 | Persistence | Local JSON files |
@@ -99,7 +99,7 @@ Create `backend/.env`:
 
 ```env
 GROQ_API_KEY=your_groq_api_key
-GROQ_MODEL=llama-3.3-70b-versatile
+GROQ_MODEL=openai/gpt-oss-120b
 
 # Optional email delivery
 RESEND_API_KEY=your_resend_api_key
@@ -205,7 +205,7 @@ separate services from the same GitHub repository.
 
    ```env
    GROQ_API_KEY=your_groq_api_key
-   GROQ_MODEL=llama-3.3-70b-versatile
+   GROQ_MODEL=openai/gpt-oss-120b
    RESEND_API_KEY=your_resend_api_key
    EMAIL_FROM=AI Interviewer <results@mail.csongorosz.com>
    ALLOWED_ORIGINS=["http://localhost:3000"]

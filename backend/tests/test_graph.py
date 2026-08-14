@@ -17,6 +17,7 @@ from agent.graph import (
     get_llm,
     parse_assessment_result,
 )
+from agent.llm import DEFAULT_GROQ_MODEL
 
 
 class _Response:
@@ -61,6 +62,19 @@ class AssessmentResultTests(unittest.TestCase):
 
 
 class ProviderConfigurationTests(unittest.TestCase):
+    def test_uses_replacement_model_by_default(self):
+        with (
+            patch.dict(os.environ, {"GROQ_API_KEY": "test-key"}, clear=True),
+            patch("agent.llm.ChatGroq") as mock_chat_groq,
+        ):
+            get_llm("groq")
+
+        self.assertEqual(DEFAULT_GROQ_MODEL, "openai/gpt-oss-120b")
+        self.assertEqual(
+            mock_chat_groq.call_args.kwargs["model"],
+            "openai/gpt-oss-120b",
+        )
+
     def test_groq_requires_an_api_key(self):
         with patch.dict(os.environ, {}, clear=True):
             with self.assertRaisesRegex(ValueError, "GROQ_API_KEY"):
