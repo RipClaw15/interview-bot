@@ -55,6 +55,24 @@ class RagGroundingTests(unittest.TestCase):
         self.assertEqual(add_rag_grounding(prompt, ""), prompt)
 
 
+class HealthEndpointTests(unittest.TestCase):
+    def test_reports_the_default_groq_model(self):
+        with patch.dict(os.environ, {}, clear=True):
+            result = app_module.health()
+
+        self.assertEqual(result["model"], "openai/gpt-oss-120b")
+
+    def test_reports_the_configured_groq_model(self):
+        with patch.dict(
+            os.environ,
+            {"GROQ_MODEL": "qwen/qwen3.6-27b"},
+            clear=True,
+        ):
+            result = app_module.health()
+
+        self.assertEqual(result["model"], "qwen/qwen3.6-27b")
+
+
 class SessionCleanupTests(unittest.TestCase):
     def tearDown(self):
         app_module.sessions.clear()

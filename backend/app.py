@@ -28,7 +28,7 @@ from agent.interview import (
     build_summary_prompt,
     get_next_interview_action,
 )
-from agent.llm import get_llm
+from agent.llm import DEFAULT_GROQ_MODEL, get_llm
 from agent.rag.indexer import build_index
 from agent.rag.retriever import get_relevant_context
 from agent.state import (
@@ -522,7 +522,7 @@ def health():
     return {
         "status": "ok",
         "provider": os.getenv("LLM_PROVIDER", "groq"),
-        "model": os.getenv("LLM_MODEL", "llama-3.3-70b-versatile"),
+        "model": os.getenv("GROQ_MODEL", DEFAULT_GROQ_MODEL),
     }
 
 
