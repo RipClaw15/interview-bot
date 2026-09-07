@@ -8,15 +8,15 @@ Participants can optionally upload a CV as a PDF. Relevant experience is
 retrieved from the document and supplied to the interviewer, allowing the
 conversation to be personalized without making CV upload mandatory.
 
-** Conversation with the interviewer **
+**Conversation with the interviewer**
 
 <img width="1006" height="883" alt="image" src="https://github.com/user-attachments/assets/df70f2c2-daab-4c83-ab12-b5abc635c6a0" />
 
-** Conversation summary after 4 questions **
+**Conversation summary after 4 questions**
 
 <img width="907" height="882" alt="image" src="https://github.com/user-attachments/assets/78dd64ad-a04f-4f2f-a954-a592cfe63067" />
 
-** Summary sent to my email **
+**Summary sent to my email**
 
 <img width="1574" height="792" alt="image" src="https://github.com/user-attachments/assets/0f53a734-23ea-4431-99e8-4244c023d3c8" />
 
